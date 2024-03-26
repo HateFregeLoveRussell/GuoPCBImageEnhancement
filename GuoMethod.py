@@ -138,7 +138,8 @@ def computeDoubleSigmoidTransform():
     a = 0.66
     betaList = np.linspace(0,1, 20)
     thetaList = [0 ,np.pi/4, np.pi/2, 3*np.pi/4]
-    img = cv2.imread('rotated_test_PCB.jpg')
+    imgPath = os.path.joing('Inputs', 'rotated_test_PCB.jpg')
+    img = cv2.imread(imgPath)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     visualize('Intermediates','test_pcb', img)
     outputs = DoubleSigmoidTransform(img, sigma,thetaList, betaList, a)
