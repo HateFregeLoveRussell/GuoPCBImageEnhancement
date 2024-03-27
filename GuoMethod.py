@@ -5,18 +5,21 @@ import cv2
 
 import cv2
 import numpy as np
+import csv
+import time
+from datetime import datetime
 import os
 import matplotlib.pyplot as plt
-
+from concurrent.futures import ProcessPoolExecutor
 
 def bilinear_interpolate_vectorized(image, x, y):
     """
     Vectorized bilinear interpolation for a set of x and y coordinates in an image.
 
     :param image: 2D array representing the image.
-    :param x: 1D array of x-coordinates (sub-pixel allowed).
-    :param y: 1D array of y-coordinates (sub-pixel allowed).
-    :return: 1D array of interpolated values at the specified coordinates.
+    :param x: 2D  or 1D array of x-coordinates (sub-pixel allowed).
+    :param y: 2D or 1D array of y-coordinates (sub-pixel allowed).
+    :return: 2D or 1D array of interpolated values at the specified coordinates.
     """
     # Floor of the coordinates
     x0 = np.floor(x).astype(int)
@@ -39,66 +42,100 @@ def bilinear_interpolate_vectorized(image, x, y):
     # Perform the bilinear interpolation
     return wa * Ia + wb * Ib + wc * Ic + wd * Id
 
-def listsigmoid(sigma, x, y, neighborhood, thetaList, a=0.66):
-    outputs = np.zeros_like(thetaList)
-    for i, theta in enumerate(thetaList):
-        p_values = np.arange(- sigma, sigma+1)
-        x_new = x + p_values * np.cos(theta)
-        y_new = y + p_values * np.sin(theta)
-        f_p = bilinear_interpolate_vectorized(neighborhood, x_new, y_new)
-        a_p = (1 - np.exp(-p_values / a)) / (1 + np.exp(-p_values / a))
-        outputs[i] = np.dot(f_p,a_p)
-    return outputs
-def sigmoidSingular(sigma, x,y, neighborhood, theta, a = 0.66):
-    p_values = np.arange(- sigma, sigma)
+
+def sigmoidSingular(sigma, neighborhood, theta, a = 0.66):
+    p_values = np.arange(- sigma, sigma + 1)
+    x,y =  sigma + 1, sigma + 1
     x_new = x + p_values * np.cos(theta)
     y_new = y + p_values * np.sin(theta)
+    # print(f'neighborhood shape: {neighborhood.shape}, theta: {theta}')
+    # print(f'x_new: {x_new}, y_new: {y_new}')
     f_p = bilinear_interpolate_vectorized(neighborhood, x_new, y_new)
     a_p = (1 - np.exp(-p_values / a)) / (1 + np.exp(-p_values / a))
     output = np.dot(f_p,a_p)
     return output
+
+
+def listSigmoid(sigma, neighborhood, thetaList, a=0.66):
+    p_values = np.arange(-sigma, sigma + 1)
+    x, y = sigma + 1, sigma + 1
+
+    # Calculate x_new and y_new for all theta values simultaneously
+    # Shapes are expanded to (len(thetaList), len(p_values)) to perform the calculations for all thetas at once
+    x_new = x + np.outer(np.cos(thetaList), p_values)
+    y_new = y + np.outer(np.sin(thetaList), p_values)
+
+    # Perform the bilinear interpolation for all thetas and their corresponding p_values in a single call
+    # f_p will have a shape of (len(thetaList), len(p_values))
+    f_p = bilinear_interpolate_vectorized(neighborhood, x_new, y_new)
+
+    # Compute the activation 'a_p' for each 'p_value', this does not depend on theta and is 1D
+    a_p = (1 - np.exp(-p_values / a)) / (1 + np.exp(-p_values / a))
+
+    # Now, for the dot product, since f_p is 2D (theta x p_values) and a_p is 1D, numpy will handle this as
+    # a row-wise dot product, giving us the output for each theta.
+    outputs = np.dot(f_p, a_p)
+
+    return outputs
+
+def SecondPassSigmoidTransformPerTheta(theta, output_image, pad_width, height, width, padded_image, sigma, a):
+    print(f'Processing theta {theta}')
+    padded_output_image = cv2.copyMakeBorder(output_image, pad_width + 1, pad_width + 1, pad_width + 1, pad_width + 1,
+                                             cv2.BORDER_REPLICATE)
+    final_output_image = np.zeros((height, width))
+    for y in range(height):
+        if y % 10 == 0:  # Print progress every 10 lines
+            print(f'Convolution progress for theta {theta}: {round(y / height * 100, 2)}%')
+        for x in range(width):
+            x_sample, y_sample = x + pad_width + 1, y + pad_width + 1
+            neigh_x_sta = x_sample - sigma - 1
+            neigh_x_end = x_sample + sigma + 2
+            neigh_y_sta = y_sample - sigma - 1
+            neigh_y_end = y_sample + sigma + 2
+            neighborhood = padded_image[neigh_y_sta:neigh_y_end, neigh_x_sta:neigh_x_end]
+            final_output_image[y, x] = sigmoidSingular(sigma, neighborhood, theta, a)
+    return theta, final_output_image
 
 def DoubleSigmoidTransform(image, sigma, thetaList, betaList,a=0.66 ):
     height, width = image.shape[:2]
     pad_width = sigma
     padded_image = cv2.copyMakeBorder(image, pad_width+1, pad_width+1, pad_width+1, pad_width+1,
                                       cv2.BORDER_REFLECT)
-
     # Adjust the output array to hold an image for each theta
     output_images = np.zeros((len(thetaList), height, width))
     # Iterate over each pixel in the image
     print(f'FIRST PASS')
     for y in range(height):
-
         if y %10 == 0:
             print(f'Convolution progress: {round(y / height * 100, 2)}%')
         for x in range(width):
             # Extract the neighborhood for this pixel
-            neighborhood = padded_image
-              # Adjust slicing to capture the correct neighborhood size
-            # Compute the list of outputs for the current pixel across all thetas
-            outputs = listsigmoid(sigma, x + pad_width, y + pad_width, neighborhood, thetaList, a)
+            x_sample, y_sample = x + pad_width+ 1, y + pad_width+ 1
+            neigh_x_sta = x_sample - sigma - 1
+            neigh_x_end = x_sample + sigma + 2
+            neigh_y_sta = y_sample - sigma - 1
+            neigh_y_end = y_sample + sigma + 2
+            # Extract the neighborhood
+            neighborhood = padded_image[neigh_y_sta:neigh_y_end, neigh_x_sta:neigh_x_end]
+            outputs = listSigmoid(sigma, neighborhood, thetaList, a)
             # Assign the outputs to the corresponding pixel location in each output image
             for i, output in enumerate(outputs):
                 output_images[i, y, x] = output
     print('SECOND PASS')
     final_output_images = np.zeros_like(output_images)
-    for i, theta in enumerate(thetaList):
-        print(f'Processing theta {theta}')
-        padded_output_image = cv2.copyMakeBorder(output_images[i], pad_width + 1, pad_width + 1, pad_width + 1, pad_width + 1,
-                           cv2.BORDER_REPLICATE)
+    # Use ProcessPoolExecutor to parallelize the second pass
+    with ProcessPoolExecutor() as executor:
+        futures = [
+            executor.submit(SecondPassSigmoidTransformPerTheta, theta, output_images[i], pad_width, height, width, padded_image, sigma, a)
+            for i, theta in enumerate(thetaList)]
+        for future in futures:
+            theta, processed_image = future.result()
+            index = thetaList.index(theta)
+            final_output_images[index] = processed_image
+            # visualize('Intermediates', f'DoubleSigmoid{round(theta, 2)}', processed_image)
+            # visualize('Intermediates', f'SingleSigmoid{round(theta, 2)}', output_images[index])
 
-        for y in range(height):
-            if y % 10 == 0:  # Print progress every 10 lines
-                print(f'Convolution progress: {round(y / height * 100, 2)}%')
-            for x in range(width):
-                # Directly use the output image from the first pass, no additional padding needed
-                neighborhood = padded_output_image
-                final_output_images[i, y, x] = sigmoidSingular(sigma, x + pad_width, y + pad_width , neighborhood, theta, a)
-        visualize('Intermediates',f'DoubleSigmoid{round(theta,2)}', final_output_images[i])
-        visualize('Intermediates', f'SingleSigmoid{round(theta, 2)}', output_images[i])
-
-        # Calculate the absolute values of the images
+    # Calculate the absolute values of the images
     abs_images = np.abs(final_output_images)
 
     # Find the indices of the maximum values along the image dimension
@@ -113,7 +150,7 @@ def DoubleSigmoidTransform(image, sigma, thetaList, betaList,a=0.66 ):
         mask = indices_of_max_abs == i
         sigmoid_image[mask] = final_output_images[i][mask]
 
-    visualize('Intermediates', f'Sigmoid Image', sigmoid_image)
+    # visualize('Intermediates', f'Sigmoid Image', sigmoid_image)
     output_image = np.zeros((len(betaList), height, width))
     for i, beta in enumerate(betaList):
         output_image[i] = image - beta*sigmoid_image
@@ -141,19 +178,23 @@ def computeDoubleSigmoidTransform():
     imgPath = os.path.join('Inputs', 'rotated_test_PCB.jpg')
     img = cv2.imread(imgPath)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    visualize('Intermediates','test_pcb', img)
+    # visualize('Intermediates','test_pcb', img)
     outputs = DoubleSigmoidTransform(img, sigma,thetaList, betaList, a)
     for i, beta in enumerate(betaList):
         output_image_path = os.path.join('Outputs', f'output_beta={round(beta,2)}.png')
         cv2.imwrite(output_image_path, outputs[i])
 
 if __name__ == '__main__':
-    # x = 200
-    # y = 300
-    # sigma = 3
-    # img = cv2.imread('test_PCB.png')
-    # img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    # print(sigmoidSingular(sigma,200,300,img,0))
-    #
-    # print(sigmoidSingular(sigma,300,200,img,0))
-    computeDoubleSigmoidTransform()
+    start_time = datetime.now()  # Record when the execution starts
+    start_time_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
+
+    start = time.time()  # Start timing
+    computeDoubleSigmoidTransform()    # Execute the function
+    end = time.time()  # End timing
+
+    duration = end - start  # Calculate how long it took
+
+    # Append the start time and duration to a CSV file
+    with open('stats.csv', 'a', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([start_time_str, duration])

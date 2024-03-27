@@ -1,0 +1,9 @@
+2024-03-26 20:30,346.7173018,Improved Bilinear Interpolation
+2024-03-26 20:42,252.3958795,Original Bilinear Interpolation
+2024-03-26 20:50,265.1354585,
+2024-03-26 21:03,201.5424809,
+2024-03-26 21:07,384.4326334,multi threaded first step
+2024-03-26 21:28,122.1905353,"Multi Threaded Second Step, No Multi Threaded First Step"
+2024-03-26 22:25,76.33651495,Fully Vectorized First Pass
+2024-03-26 22:29,62.26969957,
+2024-03-26 22:34,61.03795385,Removed Saving Intermediate Images
