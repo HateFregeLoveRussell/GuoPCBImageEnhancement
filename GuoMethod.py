@@ -8,9 +8,19 @@ import numpy as np
 import csv
 import time
 from datetime import datetime
+import cProfile
+import pstats
 import os
 import matplotlib.pyplot as plt
 from concurrent.futures import ProcessPoolExecutor
+
+
+sigma = 3
+a=0.66
+p_values = np.arange(- sigma, sigma + 1)
+a_p = (1 - np.exp(-p_values / a)) / (1 + np.exp(-p_values / a))
+thetaList = [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]
+
 
 def bilinear_interpolate_vectorized(image, x, y):
     """
@@ -43,21 +53,20 @@ def bilinear_interpolate_vectorized(image, x, y):
     return wa * Ia + wb * Ib + wc * Ic + wd * Id
 
 
-def sigmoidSingular(sigma, neighborhood, theta, a = 0.66):
-    p_values = np.arange(- sigma, sigma + 1)
+def sigmoidSingular(neighborhood, theta):
+
     x,y =  sigma + 1, sigma + 1
     x_new = x + p_values * np.cos(theta)
     y_new = y + p_values * np.sin(theta)
     # print(f'neighborhood shape: {neighborhood.shape}, theta: {theta}')
     # print(f'x_new: {x_new}, y_new: {y_new}')
     f_p = bilinear_interpolate_vectorized(neighborhood, x_new, y_new)
-    a_p = (1 - np.exp(-p_values / a)) / (1 + np.exp(-p_values / a))
+
     output = np.dot(f_p,a_p)
     return output
 
 
-def listSigmoid(sigma, neighborhood, thetaList, a=0.66):
-    p_values = np.arange(-sigma, sigma + 1)
+def listSigmoid(neighborhood):
     x, y = sigma + 1, sigma + 1
 
     # Calculate x_new and y_new for all theta values simultaneously
@@ -70,15 +79,13 @@ def listSigmoid(sigma, neighborhood, thetaList, a=0.66):
     f_p = bilinear_interpolate_vectorized(neighborhood, x_new, y_new)
 
     # Compute the activation 'a_p' for each 'p_value', this does not depend on theta and is 1D
-    a_p = (1 - np.exp(-p_values / a)) / (1 + np.exp(-p_values / a))
-
     # Now, for the dot product, since f_p is 2D (theta x p_values) and a_p is 1D, numpy will handle this as
     # a row-wise dot product, giving us the output for each theta.
     outputs = np.dot(f_p, a_p)
 
     return outputs
 
-def SecondPassSigmoidTransformPerTheta(theta, output_image, pad_width, height, width, padded_image, sigma, a):
+def SecondPassSigmoidTransformPerTheta(theta, output_image, pad_width, height, width):
     print(f'Processing theta {theta}')
     padded_output_image = cv2.copyMakeBorder(output_image, pad_width + 1, pad_width + 1, pad_width + 1, pad_width + 1,
                                              cv2.BORDER_REPLICATE)
@@ -100,7 +107,7 @@ def SecondPassSigmoidTransformPerTheta(theta, output_image, pad_width, height, w
             # Extract the neighborhood from the row_buffer instead of the padded_output_image
             neighborhood = row_buffer[:, x_sample - sigma - 1:x_sample + sigma + 2]
 
-            final_output_image[y, x] = sigmoidSingular(sigma, neighborhood, theta, a)
+            final_output_image[y, x] = sigmoidSingular(neighborhood, theta)
 
         # Update the row buffer for the next row
         if y < height - 1:  # Prevent index out of bounds on the last iteration
@@ -110,7 +117,7 @@ def SecondPassSigmoidTransformPerTheta(theta, output_image, pad_width, height, w
     return theta, final_output_image
 
 
-def DoubleSigmoidTransform(image, sigma, thetaList, betaList, a=0.66):
+def DoubleSigmoidTransform(image, betaList):
     height, width = image.shape
     pad_width = sigma
     padded_image = cv2.copyMakeBorder(image, pad_width + 1, pad_width + 1, pad_width + 1, pad_width + 1,
@@ -135,7 +142,7 @@ def DoubleSigmoidTransform(image, sigma, thetaList, betaList, a=0.66):
             # Extract the neighborhood from the row_buffer
             neighborhood = row_buffer[:, x_sample - sigma - 1:x_sample + sigma + 2]
 
-            outputs = listSigmoid(sigma, neighborhood, thetaList, a)
+            outputs = listSigmoid(neighborhood)
             for i, output in enumerate(outputs):
                 output_images[i, y, x] = output
 
@@ -151,7 +158,7 @@ def DoubleSigmoidTransform(image, sigma, thetaList, betaList, a=0.66):
     # Use ProcessPoolExecutor to parallelize the second pass
     with ProcessPoolExecutor() as executor:
         futures = [
-            executor.submit(SecondPassSigmoidTransformPerTheta, theta, output_images[i], pad_width, height, width, padded_image, sigma, a)
+            executor.submit(SecondPassSigmoidTransformPerTheta, theta, output_images[i], pad_width, height, width)
             for i, theta in enumerate(thetaList)]
         for future in futures:
             theta, processed_image = future.result()
@@ -196,32 +203,23 @@ def visualize(folder, name, image, vmin=-600, vmax=1200):
     plt.close()  # Close the plot to free up memory
 
 def computeDoubleSigmoidTransform():
-    sigma = 3
-    a = 0.66
-    betaList = np.linspace(0,1, 20)
-    thetaList = [0 ,np.pi/4, np.pi/2, 3*np.pi/4]
     imgPath = os.path.join('Inputs', 'rotated_test_PCB.jpg')
     img = cv2.imread(imgPath)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     # visualize('Intermediates','test_pcb', img)
-    outputs = DoubleSigmoidTransform(img, sigma,thetaList, betaList, a)
+    betaList = np.linspace(0,1,20)
+    outputs = DoubleSigmoidTransform(img, betaList)
     for i, beta in enumerate(betaList):
         output_image_path = os.path.join('Outputs', f'output_beta={round(beta,2)}.png')
         cv2.imwrite(output_image_path, outputs[i])
 
 if __name__ == '__main__':
-    message = "Row Buffering on First And Second Pass"
-    start_time = datetime.now()  # Record when the execution starts
-    start_time_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
+    profiler = cProfile.Profile()
+    profiler.enable()
 
-    start = time.time()  # Start timing
-    computeDoubleSigmoidTransform()    # Execute the function
-    end = time.time()  # End timing
+    computeDoubleSigmoidTransform()  # Execute the function
 
-    duration = end - start  # Calculate how long it took
+    profiler.disable()
+    stats = pstats.Stats(profiler).sort_stats('cumulative')
+    stats.print_stats()
 
-    # Append the start time and duration to a CSV file
-    with open('stats.csv', 'a', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow([start_time_str, duration, message])
-    print(f'START TIME: {start_time_str}, DURATION: {duration}, MESSAGE: {message}')
