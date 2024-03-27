@@ -83,44 +83,69 @@ def SecondPassSigmoidTransformPerTheta(theta, output_image, pad_width, height, w
     padded_output_image = cv2.copyMakeBorder(output_image, pad_width + 1, pad_width + 1, pad_width + 1, pad_width + 1,
                                              cv2.BORDER_REPLICATE)
     final_output_image = np.zeros((height, width))
+
+    # Buffer for rows of the padded output image, adapted for grayscale
+    row_buffer = np.zeros((2 * sigma + 3, padded_output_image.shape[1]))
+
+    # Initial population of the row buffer
+    row_buffer[:2 * sigma + 3, :] = padded_output_image[:2 * sigma + 3, :]
+
     for y in range(height):
         if y % 10 == 0:  # Print progress every 10 lines
             print(f'Convolution progress for theta {theta}: {round(y / height * 100, 2)}%')
+
         for x in range(width):
             x_sample, y_sample = x + pad_width + 1, y + pad_width + 1
-            neigh_x_sta = x_sample - sigma - 1
-            neigh_x_end = x_sample + sigma + 2
-            neigh_y_sta = y_sample - sigma - 1
-            neigh_y_end = y_sample + sigma + 2
-            neighborhood = padded_image[neigh_y_sta:neigh_y_end, neigh_x_sta:neigh_x_end]
+
+            # Extract the neighborhood from the row_buffer instead of the padded_output_image
+            neighborhood = row_buffer[:, x_sample - sigma - 1:x_sample + sigma + 2]
+
             final_output_image[y, x] = sigmoidSingular(sigma, neighborhood, theta, a)
+
+        # Update the row buffer for the next row
+        if y < height - 1:  # Prevent index out of bounds on the last iteration
+            row_buffer[:-1, :] = row_buffer[1:, :]
+            row_buffer[-1, :] = padded_output_image[2 * sigma + 3 + y, :]
+
     return theta, final_output_image
 
-def DoubleSigmoidTransform(image, sigma, thetaList, betaList,a=0.66 ):
-    height, width = image.shape[:2]
+
+def DoubleSigmoidTransform(image, sigma, thetaList, betaList, a=0.66):
+    height, width = image.shape
     pad_width = sigma
-    padded_image = cv2.copyMakeBorder(image, pad_width+1, pad_width+1, pad_width+1, pad_width+1,
+    padded_image = cv2.copyMakeBorder(image, pad_width + 1, pad_width + 1, pad_width + 1, pad_width + 1,
                                       cv2.BORDER_REFLECT)
-    # Adjust the output array to hold an image for each theta
     output_images = np.zeros((len(thetaList), height, width))
-    # Iterate over each pixel in the image
-    print(f'FIRST PASS')
+
+    # Buffer for rows of the padded image, adjusted for a grayscale image
+    row_buffer = np.zeros((2 * sigma + 3, padded_image.shape[1]))
+
+    # Initial population of the row buffer
+    row_buffer[:2 * sigma + 3, :] = padded_image[:2 * sigma + 3, :]
+
+    print('FIRST PASS')
     for y in range(height):
-        if y %10 == 0:
+        if y % 10 == 0:
             print(f'Convolution progress: {round(y / height * 100, 2)}%')
+
         for x in range(width):
-            # Extract the neighborhood for this pixel
-            x_sample, y_sample = x + pad_width+ 1, y + pad_width+ 1
-            neigh_x_sta = x_sample - sigma - 1
-            neigh_x_end = x_sample + sigma + 2
-            neigh_y_sta = y_sample - sigma - 1
-            neigh_y_end = y_sample + sigma + 2
-            # Extract the neighborhood
-            neighborhood = padded_image[neigh_y_sta:neigh_y_end, neigh_x_sta:neigh_x_end]
+            # Coordinates in the padded image
+            x_sample, y_sample = x + pad_width + 1, y + pad_width + 1
+
+            # Extract the neighborhood from the row_buffer
+            neighborhood = row_buffer[:, x_sample - sigma - 1:x_sample + sigma + 2]
+
             outputs = listSigmoid(sigma, neighborhood, thetaList, a)
-            # Assign the outputs to the corresponding pixel location in each output image
             for i, output in enumerate(outputs):
                 output_images[i, y, x] = output
+
+        # After processing each row, update the row buffer for the next row
+        if y < height - 1:  # Check to prevent index out of bounds on the last iteration
+            # Scroll the row buffer: discard the top row and append the next row from the padded_image
+            row_buffer[:-1, :] = row_buffer[1:, :]
+            # Add the new bottom row to the buffer
+            row_buffer[-1, :] = padded_image[2 * sigma + 3 + y, :]
+
     print('SECOND PASS')
     final_output_images = np.zeros_like(output_images)
     # Use ProcessPoolExecutor to parallelize the second pass
@@ -185,6 +210,7 @@ def computeDoubleSigmoidTransform():
         cv2.imwrite(output_image_path, outputs[i])
 
 if __name__ == '__main__':
+    message = "Row Buffering on First And Second Pass"
     start_time = datetime.now()  # Record when the execution starts
     start_time_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -197,4 +223,5 @@ if __name__ == '__main__':
     # Append the start time and duration to a CSV file
     with open('stats.csv', 'a', newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow([start_time_str, duration])
+        writer.writerow([start_time_str, duration, message])
+    print(f'START TIME: {start_time_str}, DURATION: {duration}, MESSAGE: {message}')
