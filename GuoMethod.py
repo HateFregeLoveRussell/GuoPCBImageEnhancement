@@ -10,6 +10,7 @@ import pstats
 import os
 import matplotlib.pyplot as plt
 from scipy.signal import convolve
+from ReColor import match_intensity_and_color_lab
 
 sigma = 3
 a=0.66
@@ -130,23 +131,15 @@ def visualize(folder, name, image, vmin=-600, vmax=1200):
     cv2.imwrite(imgPath, image)
     plt.close()  # Close the plot to free up memory
 
-def computeDoubleSigmoidTransform():
+def computeDoubleSigmoidTransform(betaList, index):
     imgPath = os.path.join('Inputs', 'rotated_test_PCB.jpg')
+    output_image_path = os.path.join('Outputs', f'output_Recolor.png')
+
     img = cv2.imread(imgPath)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    # visualize('Intermediates','test_pcb', img)
-    betaList = np.linspace(0,1,20)
-    outputs = DoubleSigmoidSinglePassTransform(img, betaList)
-    for i, beta in enumerate(betaList):
-        output_image_path = os.path.join('Outputs', f'output_beta={round(beta,2)}.png')
-        cv2.imwrite(output_image_path, outputs[i])
+    output = DoubleSigmoidSinglePassTransform(img, betaList)[0]
+    cv2.imwrite(output_image_path, output)
 
+    match_intensity_and_color_lab(imgPath, output_image_path, output_image_path)
 if __name__ == '__main__':
-    profiler = cProfile.Profile()
-    profiler.enable()
-
-    computeDoubleSigmoidTransform()  # Execute the function
-
-    profiler.disable()
-    stats = pstats.Stats(profiler).sort_stats('cumulative')
-    stats.print_stats()
+    computeDoubleSigmoidTransform([0.25], 0)

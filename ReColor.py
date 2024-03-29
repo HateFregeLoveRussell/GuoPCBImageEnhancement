@@ -42,9 +42,8 @@ def match_intensity_and_color_lab(input_image_path, enhanced_image_path, output_
 
     # Save the merged image
     cv2.imwrite(output_image_path, merged_image)
-
-if __name__ == '__main__':
-    enhanced_path = os.path.join('Outputs', 'output_beta=0.53.png')
-    input_path = os.path.join('Inputs', 'rotated_test_PCB.jpg')
-    output_path = os.path.join('ColoredOutputs', 'colored_output_beta=0.53_YCrCb.png')
-    match_intensity_and_color_YCrCb(input_path,enhanced_path,output_path)
+def reColor(inp_img, enhanced_img, output_image_path):
+    lab_image = cv2.cvtColor(inp_img, cv2.COLOR_BGR2Lab)
+    lab_image[:, :, 0] = enhanced_img
+    merged_image = cv2.cvtColor(lab_image, cv2.COLOR_Lab2BGR)
+    cv2.imwrite(output_image_path, merged_image)
