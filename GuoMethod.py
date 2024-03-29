@@ -5,6 +5,7 @@ import cProfile
 import pstats
 import os
 from pathlib import Path
+import csv
 import matplotlib.pyplot as plt
 from scipy.signal import convolve
 from ReColor import match_intensity_and_color_YCrCb
@@ -128,6 +129,34 @@ def visualize(folder, name, image, vmin=-600, vmax=1200):
     cv2.imwrite(imgPath, image)
     plt.close()  # Close the plot to free up memory
 
+
+def check_processed(file_name, beta, csv_path):
+    # Ensure the CSV file exists before attempting to read; if not, return False
+    if not os.path.exists(csv_path):
+        with open(csv_path, mode='w', newline='') as csvfile:
+            fieldnames = ['FileName', 'Beta']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+        return False
+
+    with open(csv_path, mode='r', newline='') as csvfile:
+        csvreader = csv.DictReader(csvfile)
+        for row in csvreader:
+            if row['FileName'] == file_name and float(row['Beta']) == round(beta, 2):
+                return True
+    return False
+
+
+def log_processed(file_name, beta, csv_path):
+    # Open the file in append mode, creating it if it doesn't exist
+    with open(csv_path, mode='a', newline='') as csvfile:
+        fieldnames = ['FileName', 'Beta']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        if csvfile.tell() == 0:  # Check if file is empty to write header
+            writer.writeheader()
+        writer.writerow({'FileName': file_name, 'Beta': round(beta, 2)})
+
+
 def computeDoubleSigmoidTransform(args, betaList):
     imglist = os.listdir(args.input_folder)
     sortedImgList = sorted(imglist)
@@ -135,29 +164,36 @@ def computeDoubleSigmoidTransform(args, betaList):
     start = args.start_index
     end = args.stop_index if args.stop_index <= len(sortedImgList) else len(sortedImgList)
 
+    csv_path = 'processed_images.csv'
     for beta in betaList:
         save_path = os.path.join(args.save_folder, str(round(beta, 2)))
         print(save_path)
         if not os.path.exists(save_path):
-            # If the folder does not exist, create it
             os.makedirs(save_path)
             print(f"Folder '{save_path}' created successfully.")
 
     for n in range(start, end):
-        imgPath = os.path.join(args.input_folder, sortedImgList[n])
-        output_image_path = os.path.join(args.save_folder, sortedImgList[n])
-
+        imgName = sortedImgList[n]
+        # print(imgName)
+        imgPath = os.path.join(args.input_folder, imgName)
         print(imgPath)
-        print(output_image_path)
-
-        img = cv2.imread(imgPath)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        output = DoubleSigmoidSinglePassTransform(img, betaList)
-        for i, beta in enumerate(betaList):
-            output_image_path = os.path.join(args.save_folder, str(round(beta,2)), sortedImgList[n])
+        # Check each if beta exists if already computed remove from images betalist
+        tmpBetaList = [round(beta,2) for beta in betaList if not check_processed(imgName, beta, csv_path)]
+        # print(tmpBetaList)
+        tmpBetaList = np.array(tmpBetaList)
+        # Process Image on Beta Values not yet Recorded
+        if tmpBetaList.size != 0:
+            # print(betaList)
+            img = cv2.imread(imgPath)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            output = DoubleSigmoidSinglePassTransform(img, tmpBetaList)
+            output_image_path = os.path.join(args.save_folder, str(round(beta, 2)), imgName)
             print(output_image_path)
-            cv2.imwrite(output_image_path, output[i])
-            match_intensity_and_color_YCrCb(imgPath, output_image_path, output_image_path)
+            for i, beta in enumerate(tmpBetaList):
+                cv2.imwrite(output_image_path, output[i])
+                match_intensity_and_color_YCrCb(imgPath, output_image_path, output_image_path)
+                log_processed(imgName, beta, csv_path)
+
             
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
