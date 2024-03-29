@@ -4,9 +4,10 @@ import numpy as np
 import cProfile
 import pstats
 import os
+from pathlib import Path
 import matplotlib.pyplot as plt
 from scipy.signal import convolve
-from ReColor import match_intensity_and_color_lab
+from ReColor import match_intensity_and_color_YCrCb
 
 sigma = 3
 a=0.66
@@ -134,6 +135,14 @@ def computeDoubleSigmoidTransform(args, betaList):
     start = args.start_index
     end = args.stop_index if args.stop_index <= len(sortedImgList) else len(sortedImgList)
 
+    for beta in betaList:
+        save_path = os.path.join(args.save_folder, str(round(beta, 2)))
+        print(save_path)
+        if not os.path.exists(save_path):
+            # If the folder does not exist, create it
+            os.makedirs(save_path)
+            print(f"Folder '{save_path}' created successfully.")
+
     for n in range(start, end):
         imgPath = os.path.join(args.input_folder, sortedImgList[n])
         output_image_path = os.path.join(args.save_folder, sortedImgList[n])
@@ -143,10 +152,13 @@ def computeDoubleSigmoidTransform(args, betaList):
 
         img = cv2.imread(imgPath)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        output = DoubleSigmoidSinglePassTransform(img, betaList)[0]
-        cv2.imwrite(output_image_path, output)
-
-        match_intensity_and_color_lab(imgPath, output_image_path, output_image_path)
+        output = DoubleSigmoidSinglePassTransform(img, betaList)
+        for i, beta in enumerate(betaList):
+            output_image_path = os.path.join(args.save_folder, str(round(beta,2)), sortedImgList[n])
+            print(output_image_path)
+            cv2.imwrite(output_image_path, output[i])
+            match_intensity_and_color_YCrCb(imgPath, output_image_path, output_image_path)
+            
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("input_folder", help="path to input files (jpg)",
@@ -160,4 +172,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print(args.input_folder)
     print(args.save_folder)
-    computeDoubleSigmoidTransform(args, [0.25])
+    computeDoubleSigmoidTransform(args, np.linspace(0, 1, 11))
