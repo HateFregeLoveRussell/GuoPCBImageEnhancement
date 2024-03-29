@@ -1,8 +1,4 @@
-import numpy as np
-import cv2
-
-
-
+import argparse
 import cv2
 import numpy as np
 import cProfile
@@ -131,15 +127,37 @@ def visualize(folder, name, image, vmin=-600, vmax=1200):
     cv2.imwrite(imgPath, image)
     plt.close()  # Close the plot to free up memory
 
-def computeDoubleSigmoidTransform(betaList, index):
-    imgPath = os.path.join('Inputs', 'rotated_test_PCB.jpg')
-    output_image_path = os.path.join('Outputs', f'output_Recolor.png')
+def computeDoubleSigmoidTransform(args, betaList):
+    imglist = os.listdir(args.input_folder)
+    sortedImgList = sorted(imglist)
 
-    img = cv2.imread(imgPath)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    output = DoubleSigmoidSinglePassTransform(img, betaList)[0]
-    cv2.imwrite(output_image_path, output)
+    start = args.start_index
+    end = args.stop_index if args.stop_index <= len(sortedImgList) else len(sortedImgList)
 
-    match_intensity_and_color_lab(imgPath, output_image_path, output_image_path)
+    for n in range(start, end):
+        imgPath = os.path.join(args.input_folder, sortedImgList[n])
+        output_image_path = os.path.join(args.save_folder, sortedImgList[n])
+
+        print(imgPath)
+        print(output_image_path)
+
+        img = cv2.imread(imgPath)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        output = DoubleSigmoidSinglePassTransform(img, betaList)[0]
+        cv2.imwrite(output_image_path, output)
+
+        match_intensity_and_color_lab(imgPath, output_image_path, output_image_path)
 if __name__ == '__main__':
-    computeDoubleSigmoidTransform([0.25], 0)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input_folder", help="path to input files (jpg)",
+            type=str)
+    parser.add_argument("save_folder", help="path to where output images are saved. Please ensure that this folder is created before running this file.", 
+            type=str)
+    parser.add_argument("start_index", help="index to start processing", 
+            type=int)
+    parser.add_argument("stop_index", help="index to stop processing", 
+            type=int)
+    args = parser.parse_args()
+    print(args.input_folder)
+    print(args.save_folder)
+    computeDoubleSigmoidTransform(args, [0.25])
