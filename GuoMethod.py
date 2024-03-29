@@ -183,13 +183,12 @@ def computeDoubleSigmoidTransform(args, betaList):
         tmpBetaList = np.array(tmpBetaList)
         # Process Image on Beta Values not yet Recorded
         if tmpBetaList.size != 0:
-            # print(betaList)
+            print(tmpBetaList)
             img = cv2.imread(imgPath)
             img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             output = DoubleSigmoidSinglePassTransform(img, tmpBetaList)
-            output_image_path = os.path.join(args.save_folder, str(round(beta, 2)), imgName)
-            print(output_image_path)
             for i, beta in enumerate(tmpBetaList):
+                output_image_path = os.path.join(args.save_folder, str(round(beta, 2)), imgName)
                 cv2.imwrite(output_image_path, output[i])
                 match_intensity_and_color_YCrCb(imgPath, output_image_path, output_image_path)
                 log_processed(imgName, beta, csv_path)
