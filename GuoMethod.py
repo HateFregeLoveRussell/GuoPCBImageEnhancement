@@ -1,10 +1,7 @@
 import argparse
 import cv2
 import numpy as np
-import cProfile
-import pstats
 import os
-from pathlib import Path
 import csv
 import matplotlib.pyplot as plt
 from scipy.signal import convolve
